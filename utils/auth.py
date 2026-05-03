@@ -1,13 +1,13 @@
 """
 utils/auth.py
 Authentication: login, register, session management, role-based access.
-Passwords hashed with bcrypt via passlib.
+Passwords hashed with bcrypt (direct, passlib-free — Python 3.14 compatible).
 """
 
 from __future__ import annotations
 
+import bcrypt as _bcrypt
 import streamlit as st
-from passlib.hash import bcrypt
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -19,12 +19,12 @@ from utils.sheets import (
 # ─── Password helpers ─────────────────────────────────────────────────────────
 
 def hash_password(plain: str) -> str:
-    return bcrypt.hash(plain)
+    return _bcrypt.hashpw(plain.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     try:
-        return bcrypt.verify(plain, hashed)
+        return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
     except Exception:
         return False
 
