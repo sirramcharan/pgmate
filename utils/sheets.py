@@ -22,7 +22,7 @@ SCOPES = [
 
 SPREADSHEET_NAME = "LayZ_DB"
 
-# ── Sheet column definitions (used for init) ──────────────────────────────────
+# ── Sheet column definitions (used for init) ────────────────────────────────
 SHEET_HEADERS: dict[str, list[str]] = {
     "Users": [
         "user_id","name","email","phone","password_hash","role","pg_name",
@@ -110,7 +110,6 @@ def get_sheet(sheet_name: str) -> Optional[gspread.Worksheet]:
     try:
         return spreadsheet.worksheet(sheet_name)
     except gspread.WorksheetNotFound:
-        # Auto-create with correct headers
         headers = SHEET_HEADERS.get(sheet_name, [])
         ws = spreadsheet.add_worksheet(title=sheet_name, rows=1000, cols=len(headers) + 2)
         if headers:
@@ -151,10 +150,15 @@ def _demo_delete(sheet_name: str, key_field: str, key_value: Any):
     ]
 
 
-# ─── Core read / write helpers ────────────────────────────────────────────────
+# ─── Cached read ────────────────────────────────────────────────────────────────
 
-def read_sheet(sheet_name: str) -> pd.DataFrame:
-    """Read a sheet and return as DataFrame. Falls back to demo store."""
+@st.cache_data(ttl=30, show_spinner=False)
+def _cached_read(sheet_name: str, _cache_version: int = 0) -> pd.DataFrame:
+    """
+    Internal cached reader. TTL=30s limits API calls to max 2/min per sheet.
+    _cache_version is bumped by _invalidate_cache() after every write
+    so fresh data is fetched immediately after mutations.
+    """
     ws = get_sheet(sheet_name)
     if ws is None:
         return _demo_read(sheet_name)
@@ -163,13 +167,20 @@ def read_sheet(sheet_name: str) -> pd.DataFrame:
         if not records:
             return pd.DataFrame(columns=SHEET_HEADERS.get(sheet_name, []))
         df = pd.DataFrame(records)
-        # Replace empty strings with NaN for consistency
         df.replace("", pd.NA, inplace=True)
         return df
     except Exception as e:
         st.warning(f"Read error ({sheet_name}): {e}")
         return _demo_read(sheet_name)
 
+
+def read_sheet(sheet_name: str) -> pd.DataFrame:
+    """Public read function — uses cache, busted on every write."""
+    version = st.session_state.get(f"cache_v_{sheet_name}", 0)
+    return _cached_read(sheet_name, _cache_version=version)
+
+
+# ─── Write helpers ────────────────────────────────────────────────────────────
 
 def append_row(sheet_name: str, data_dict: dict) -> bool:
     """Append a new row. Columns follow SHEET_HEADERS order."""
@@ -195,14 +206,13 @@ def update_row(sheet_name: str, key_field: str, key_value: Any, data_dict: dict)
         _demo_update(sheet_name, key_field, key_value, data_dict)
         return True
     try:
-        df = read_sheet(sheet_name)
+        df = _cached_read(sheet_name, _cache_version=st.session_state.get(f"cache_v_{sheet_name}", 0))
         if df.empty or key_field not in df.columns:
             return False
         df[key_field] = df[key_field].astype(str)
         matches = df[df[key_field] == str(key_value)]
         if matches.empty:
             return False
-        # Sheet rows are 1-indexed; row 1 is headers
         sheet_row_idx = matches.index[0] + 2
         headers = list(df.columns)
         for col, val in data_dict.items():
@@ -223,7 +233,7 @@ def delete_row(sheet_name: str, key_field: str, key_value: Any) -> bool:
         _demo_delete(sheet_name, key_field, key_value)
         return True
     try:
-        df = read_sheet(sheet_name)
+        df = _cached_read(sheet_name, _cache_version=st.session_state.get(f"cache_v_{sheet_name}", 0))
         if df.empty or key_field not in df.columns:
             return False
         df[key_field] = df[key_field].astype(str)
@@ -250,12 +260,10 @@ def upsert_row(sheet_name: str, key_field: str, key_value: Any, data_dict: dict)
 
 
 def new_id() -> str:
-    """Generate a short unique ID."""
     return str(uuid.uuid4())[:8].upper()
 
 
 def now_str() -> str:
-    """Current datetime as string."""
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -264,9 +272,7 @@ def today_str() -> str:
 
 
 def _invalidate_cache(sheet_name: str):
-    """Clear cached reads (call after writes)."""
-    # Streamlit caching doesn't expose per-key invalidation easily,
-    # so we use a version counter in session_state.
+    """Bump version counter so next read_sheet() skips the stale cache."""
     key = f"cache_v_{sheet_name}"
     st.session_state[key] = st.session_state.get(key, 0) + 1
 
@@ -279,7 +285,6 @@ def log_activity(
     entity_id: str,
     details: str = "",
 ):
-    """Write an activity log entry."""
     append_row(
         "ActivityLog",
         {
