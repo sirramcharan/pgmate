@@ -49,81 +49,84 @@ pending = (
     rent_df[rent_df["status"].isin(["Due", "Overdue", "Partial"])]
     if "status" in rent_df.columns
     else rent_df
-)
+).copy()
 
 if pending.empty:
     st.success(f"\U0001f389 All tenants have paid for {month_year}!")
     st.stop()
 
-# ── Safe merge with tenant + room info ─────────────────────────────────────────
-merged = pending.copy()
+# ── Normalise join key: strip whitespace, force uppercase string ───────────────────
+def _norm_id(series: pd.Series) -> pd.Series:
+    """Strip whitespace and uppercase so IDs always match."""
+    return series.astype(str).str.strip().str.upper()
 
-# Ensure baseline columns exist so nothing crashes downstream
+pending["tenant_id"] = _norm_id(pending["tenant_id"]) if "tenant_id" in pending.columns else ""
+
+# Pre-fill display columns so nothing crashes downstream
 for col in ["tenant_name", "phone", "room_id", "room_label"]:
-    if col not in merged.columns:
-        merged[col] = ""
+    if col not in pending.columns:
+        pending[col] = ""
 
+# ── Merge tenant info ─────────────────────────────────────────────────────────────
 if not tenants_df.empty and "tenant_id" in tenants_df.columns:
-    # Only pull columns that actually exist in tenants_df
-    tenant_cols = ["tenant_id"]
-    for c in ["tenant_name", "phone", "room_id"]:
-        if c in tenants_df.columns:
-            tenant_cols.append(c)
+    tenants_df = tenants_df.copy()
+    tenants_df["tenant_id"] = _norm_id(tenants_df["tenant_id"])
 
-    merged = merged.merge(
-        tenants_df[tenant_cols],
-        on="tenant_id",
-        how="left",
-        suffixes=("", "_t"),
-    )
-    # Keep the tenant-side value if the pending df had blanks
-    for c in ["tenant_name", "phone", "room_id"]:
-        if f"{c}_t" in merged.columns:
-            merged[c] = merged[c].fillna(merged[f"{c}_t"])
-            merged.drop(columns=[f"{c}_t"], inplace=True)
+    # Only pick columns that actually exist
+    t_cols = ["tenant_id"] + [c for c in ["tenant_name", "phone", "room_id"] if c in tenants_df.columns]
+    pending = pending.merge(tenants_df[t_cols], on="tenant_id", how="left", suffixes=("", "_t"))
 
-# Merge room label
+    # Prefer freshly-merged values over any stale blanks from the rent sheet
+    for c in ["tenant_name", "phone", "room_id"]:
+        if f"{c}_t" in pending.columns:
+            pending[c] = pending[f"{c}_t"].fillna(pending[c])
+            pending.drop(columns=[f"{c}_t"], inplace=True)
+        elif c in pending.columns:
+            pass  # already exists from pre-fill
+
+# ── Merge room label ──────────────────────────────────────────────────────────────
 if (
     not rooms_df.empty
     and "room_id" in rooms_df.columns
     and "room_label" in rooms_df.columns
-    and "room_id" in merged.columns
+    and "room_id" in pending.columns
 ):
-    merged = merged.merge(
-        rooms_df[["room_id", "room_label"]],
-        on="room_id",
-        how="left",
-        suffixes=("", "_r"),
-    )
-    if "room_label_r" in merged.columns:
-        merged["room_label"] = merged["room_label"].fillna(merged["room_label_r"])
-        merged.drop(columns=["room_label_r"], inplace=True)
+    rooms_df = rooms_df.copy()
+    rooms_df["room_id"] = _norm_id(rooms_df["room_id"])
+    pending["room_id"] = _norm_id(pending["room_id"])
 
-# Final safety fill — replace NaN with "—"
+    pending = pending.merge(
+        rooms_df[["room_id", "room_label"]], on="room_id", how="left", suffixes=("", "_r")
+    )
+    if "room_label_r" in pending.columns:
+        pending["room_label"] = pending["room_label_r"].fillna(pending["room_label"])
+        pending.drop(columns=["room_label_r"], inplace=True)
+
+# Final safety fill — replace NaN / blank with "—"
 for col in ["tenant_name", "phone", "room_label"]:
-    merged[col] = merged[col].fillna("—").astype(str)
+    pending[col] = pending[col].replace("", pd.NA).fillna("\u2014").astype(str)
 
 # ── Search filter ───────────────────────────────────────────────────────────────
 if search:
-    mask = pd.Series([False] * len(merged), index=merged.index)
+    mask = pd.Series([False] * len(pending), index=pending.index)
     for col in ["tenant_name", "phone", "room_label"]:
-        mask |= merged[col].str.lower().str.contains(search.lower(), na=False)
-    merged = merged[mask]
+        mask |= pending[col].str.lower().str.contains(search.lower(), na=False)
+    pending = pending[mask]
 
 st.markdown(
-    f"<p style='color:#b8b1d9;'>{len(merged)} pending payment(s) for <b>{month_year}</b></p>",
+    f"<p style='color:#b8b1d9;'>{len(pending)} pending payment(s) for <b>{month_year}</b></p>",
     unsafe_allow_html=True,
 )
 st.divider()
 
 # ── Compact row-per-tenant list ─────────────────────────────────────────────────────
-for _, row in merged.iterrows():
-    rent_id   = str(row.get("rent_id", ""))
-    t_name    = str(row.get("tenant_name", "—"))
-    phone     = str(row.get("phone", "—"))
-    room      = str(row.get("room_label", "—"))
-    amount    = row.get("amount", 0)
-    status    = str(row.get("status", "Due"))
+for _, row in pending.iterrows():
+    rent_id = str(row.get("rent_id", ""))
+    t_name  = str(row.get("tenant_name", "\u2014"))
+    phone   = str(row.get("phone", "\u2014"))
+    room    = str(row.get("room_label", "\u2014"))
+    amount  = row.get("amount", 0)
+    status  = str(row.get("status", "Due"))
 
     s_color = "#f59e0b" if status == "Due" else "#ef4444" if status == "Overdue" else "#8b5cf6"
 
