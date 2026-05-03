@@ -36,6 +36,7 @@ def check_subscription(user: dict) -> bool:
     if status == "Active":
         allowed = expiry is None or expiry >= today
     elif status == "Trial":
+        # Trial expires AT END of expiry_date (i.e. expiry_date itself is still allowed)
         allowed = expiry is None or expiry >= today
     # Expired or Blocked → not allowed
 
@@ -43,71 +44,104 @@ def check_subscription(user: dict) -> bool:
         return False  # not blocked
 
     # ── Blocked UI ────────────────────────────────────────────────────────────
-    st.markdown(
-        """
-        <div style='text-align:center; padding:3rem 1rem;'>
-            <h1 style='color:#ef4444; font-size:2rem;'>🔒 Subscription Expired</h1>
-            <p style='color:#b8b1d9; font-size:1.1rem; max-width:500px; margin:auto;'>
-                Your LayZ subscription has expired or is inactive.
-                Please renew to continue managing your PG.
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    try:
+        payment_link = st.secrets["razorpay"]["payment_link"]
+    except Exception:
+        payment_link = "https://rzp.io/your-payment-link"
+
+    monthly_price = "499"
+    try:
+        monthly_price = st.secrets["razorpay"]["monthly_price"]
+    except Exception:
+        pass
+
+    plan = user.get("plan_name", "—")
+    exp_display = expiry_str if expiry_str else "Unknown"
+    status_color = "#ef4444"
+
+    st.html(f"""
+    <style>
+        .blocked-wrap {{
+            text-align: center;
+            padding: 3rem 1rem 1rem 1rem;
+        }}
+        .blocked-wrap h1 {{
+            color: #ef4444;
+            font-size: 2rem;
+        }}
+        .blocked-wrap p {{
+            color: #b8b1d9;
+            font-size: 1.1rem;
+            max-width: 500px;
+            margin: 0.5rem auto 0 auto;
+        }}
+        .sub-info-card {{
+            background: #1e1a2e;
+            border: 1px solid #3d3558;
+            border-radius: 12px;
+            padding: 1.5rem;
+            max-width: 420px;
+            margin: 1rem auto;
+        }}
+        .sub-info-card .si-label {{
+            color: #b8b1d9;
+            margin: 0;
+            font-size: 0.85rem;
+        }}
+        .sub-info-card .si-value {{
+            color: #f5f3ff;
+            margin: 2px 0 1rem 0;
+            font-weight: 700;
+        }}
+        .sub-info-card .si-status {{
+            color: {status_color};
+            font-size: 1.2rem;
+            margin: 2px 0 1rem 0;
+            font-weight: 700;
+        }}
+        .pay-btn-wrap {{
+            text-align: center;
+            margin: 1.5rem auto;
+            max-width: 420px;
+        }}
+        .pay-btn {{
+            background: #8b5cf6;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 0.75rem 2rem;
+            font-size: 1rem;
+            cursor: pointer;
+            font-weight: 700;
+            text-decoration: none;
+            display: inline-block;
+        }}
+    </style>
+
+    <div class="blocked-wrap">
+        <h1>🔒 Subscription Expired</h1>
+        <p>Your LayZ trial has ended. Subscribe to continue managing your PG.</p>
+    </div>
+
+    <div class="sub-info-card">
+        <p class="si-label">Status</p>
+        <p class="si-status">{status}</p>
+        <p class="si-label">Plan</p>
+        <p class="si-value">{plan}</p>
+        <p class="si-label">Expiry Date</p>
+        <p class="si-value">{exp_display}</p>
+    </div>
+
+    <div class="pay-btn-wrap">
+        <a class="pay-btn" href="{payment_link}" target="_blank">
+            💳 Pay ₹{monthly_price}/mo – Subscribe Now
+        </a>
+    </div>
+    """)
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        st.divider()
-        plan = user.get("plan_name", "—")
-        exp_display = expiry_str if expiry_str else "Unknown"
-        status_color = "#ef4444"
-
-        st.markdown(
-            f"""
-            <div style='background:#1e1a2e; border:1px solid #3d3558; border-radius:12px; padding:1.5rem;'>
-                <p style='color:#b8b1d9; margin:0;'>Status</p>
-                <h3 style='color:{status_color}; margin:4px 0 1rem 0;'>{status}</h3>
-                <p style='color:#b8b1d9; margin:0;'>Plan</p>
-                <p style='color:#f5f3ff; margin:4px 0 1rem 0;'>{plan}</p>
-                <p style='color:#b8b1d9; margin:0;'>Expiry Date</p>
-                <p style='color:#f5f3ff; margin:4px 0;'>{exp_display}</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        try:
-            payment_link = st.secrets["razorpay"]["payment_link"]
-        except Exception:
-            payment_link = "https://rzp.io/your-payment-link"
-
-        plan_name = ""
-        monthly_price = "499"
-        try:
-            plan_name = st.secrets["razorpay"]["plan_name"]
-            monthly_price = st.secrets["razorpay"]["monthly_price"]
-        except Exception:
-            pass
-
-        st.markdown(
-            f"""
-            <div style='text-align:center;'>
-                <a href='{payment_link}' target='_blank'>
-                    <button style='background:#8b5cf6; color:#fff; border:none; border-radius:8px;
-                        padding:0.75rem 2rem; font-size:1rem; cursor:pointer; font-weight:700;'>
-                        💳 Pay ₹{monthly_price}/mo – Renew Now
-                    </button>
-                </a>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        st.markdown("<br>", unsafe_allow_html=True)
-
         if st.button("🔄 I have paid – Refresh Status", use_container_width=True):
-            # Re-fetch user from sheet to pick up webhook updates
             from utils.sheets import read_sheet
             df = read_sheet("Users")
             if not df.empty and "email" in df.columns:
@@ -133,11 +167,5 @@ def handle_razorpay_webhook(payload: dict):
     - subscription.charged    → set status=Active, update expiry_date
     - subscription.cancelled  → set status=Expired
     - subscription.halted     → set status=Blocked
-
-    Example:
-        email = payload["payload"]["subscription"]["entity"]["notes"]["owner_email"]
-        sub_id = payload["payload"]["subscription"]["entity"]["id"]
-        event = payload["event"]
-        # Update Users sheet accordingly
     """
     pass

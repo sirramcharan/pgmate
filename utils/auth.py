@@ -64,14 +64,15 @@ def logout_user():
 def register_user(
     name: str, email: str, phone: str, pg_name: str, password: str
 ) -> dict:
-    """Create a new owner account with a 30-day trial."""
+    """Create a new owner account with a 1-day trial."""
     existing = get_user_by_email(email)
     if existing:
         return {"success": False, "message": "Email already registered."}
 
     user_id = new_id()
     trial_start = today_str()
-    expiry = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d")
+    # 1-day trial — expires tomorrow
+    expiry = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
     user = {
         "user_id": user_id,

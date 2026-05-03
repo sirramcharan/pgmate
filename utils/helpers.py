@@ -150,7 +150,6 @@ def get_owner_beds(owner_email: str, room_id: str = "", building_id: str = "") -
 def create_beds_for_room(
     owner_email: str, building_id: str, room_id: str, count: int
 ) -> list[str]:
-    """Auto-create `count` beds for a room."""
     bed_ids = []
     for i in range(1, count + 1):
         bid = new_id()
@@ -201,7 +200,6 @@ def vacate_tenant_from_bed(bed_id: str) -> bool:
 
 
 def _refresh_room_status(room_id: str):
-    """Recalculate room status based on bed occupancy."""
     beds = read_sheet("Beds")
     if beds.empty or "room_id" not in beds.columns:
         return
@@ -227,7 +225,6 @@ def get_owner_tenants(owner_email: str, building_id: str = "") -> pd.DataFrame:
 
 
 def create_tenant(owner_email: str, data: dict, actor: str = "") -> Optional[str]:
-    """Create tenant, assign to bed, create current month rent."""
     tid = new_id()
     row = {
         "tenant_id": tid,
@@ -258,17 +255,13 @@ def create_tenant(owner_email: str, data: dict, actor: str = "") -> Optional[str
     if not ok:
         return None
 
-    # Update bed
     assign_tenant_to_bed(
         data.get("bed_id", ""), tid,
         data.get("monthly_rent", ""),
         data.get("move_in_date", today_str()),
     )
     _refresh_room_status(data.get("room_id", ""))
-
-    # Create current month rent record
     generate_rent_for_tenant(owner_email, row)
-
     log_activity(
         owner_email, actor or owner_email, "CREATE", "Tenant", tid,
         f"Added tenant: {data.get('tenant_name')}"
@@ -282,7 +275,6 @@ def vacate_tenant(owner_email: str, tenant_id: str, move_out_date: str, actor: s
         {"tenant_status": "Inactive", "move_out_date": move_out_date, "updated_at": now_str()},
     )
     if ok:
-        # Vacate bed
         beds = read_sheet("Beds")
         if not beds.empty and "tenant_id" in beds.columns:
             match = beds[beds["tenant_id"] == tenant_id]
@@ -308,11 +300,9 @@ def get_owner_rent_records(owner_email: str, month_year: str = "") -> pd.DataFra
 
 
 def generate_rent_for_tenant(owner_email: str, tenant: dict) -> Optional[str]:
-    """Create current month rent record for a tenant if it doesn't exist."""
     today = datetime.now()
     month_year = today.strftime("%b %Y")
 
-    # Check if already exists
     df = read_sheet("RentMonths")
     if not df.empty and "tenant_id" in df.columns:
         existing = df[
@@ -355,7 +345,6 @@ def generate_rent_for_tenant(owner_email: str, tenant: dict) -> Optional[str]:
 
 
 def generate_monthly_rent_records(owner_email: str) -> int:
-    """Generate rent records for all active tenants for current month."""
     tenants = get_owner_tenants(owner_email)
     if tenants.empty:
         return 0
@@ -473,7 +462,6 @@ def get_dashboard_metrics(owner_email: str) -> dict:
         pending = rent[rent["status"] == "Due"]["amount"].sum()
         overdue = rent[rent["status"] == "Overdue"]["amount"].sum()
 
-    # Expense this month
     monthly_expenses = 0.0
     if not expenses.empty and "expense_date" in expenses.columns:
         expenses["expense_date"] = pd.to_datetime(expenses["expense_date"], errors="coerce")
@@ -504,10 +492,16 @@ def get_dashboard_metrics(owner_email: str) -> dict:
 # ─── WhatsApp ─────────────────────────────────────────────────────────────────
 
 def make_whatsapp_link(phone: str, message: str) -> str:
-    """Generate a wa.me link with URL-encoded message."""
+    """Generate a wa.me link with +91 prefix for Indian numbers."""
+    # Strip all non-digits
     clean_phone = "".join(filter(str.isdigit, phone))
+    # If 10-digit Indian number, prepend country code 91
     if len(clean_phone) == 10:
         clean_phone = "91" + clean_phone
+    # If someone entered 0XXXXXXXXXX (11 digits starting with 0), fix it
+    elif len(clean_phone) == 11 and clean_phone.startswith("0"):
+        clean_phone = "91" + clean_phone[1:]
+    # If already has 91 prefix (12 digits), leave as is
     encoded = urllib.parse.quote(message)
     return f"https://wa.me/{clean_phone}?text={encoded}"
 
@@ -516,6 +510,6 @@ def build_rent_reminder_message(
     tenant_name: str, amount: str, month_year: str, pg_name: str
 ) -> str:
     return (
-        f"Hi {tenant_name}, your rent of ₹{amount} for {month_year} at "
+        f"Hi {tenant_name}, your rent of \u20b9{amount} for {month_year} at "
         f"{pg_name} is pending. Please pay at the earliest. Thank you."
     )
