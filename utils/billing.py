@@ -21,6 +21,14 @@ def _parse_date(date_str: str) -> Optional[date]:
     return None
 
 
+def _get_secret(section: str, key: str, default: str = "") -> str:
+    """Safely read a secret — never raises KeyError."""
+    try:
+        return str(st.secrets[section][key])
+    except Exception:
+        return default
+
+
 def check_subscription(user: dict) -> bool:
     """
     Check if user has a valid subscription.
@@ -36,28 +44,16 @@ def check_subscription(user: dict) -> bool:
     if status == "Active":
         allowed = expiry is None or expiry >= today
     elif status == "Trial":
-        # Trial expires AT END of expiry_date (i.e. expiry_date itself is still allowed)
         allowed = expiry is None or expiry >= today
-    # Expired or Blocked → not allowed
 
     if allowed:
         return False  # not blocked
 
     # ── Blocked UI ────────────────────────────────────────────────────────────
-    try:
-        payment_link = st.secrets["razorpay"]["payment_link"]
-    except Exception:
-        payment_link = "https://rzp.io/your-payment-link"
-
-    monthly_price = "499"
-    try:
-        monthly_price = st.secrets["razorpay"]["monthly_price"]
-    except Exception:
-        pass
-
-    plan = user.get("plan_name", "—")
+    payment_link = _get_secret("razorpay", "payment_link", "#")
+    monthly_price = _get_secret("razorpay", "monthly_price", "1499")
+    plan = user.get("plan_name") or "—"
     exp_display = expiry_str if expiry_str else "Unknown"
-    status_color = "#ef4444"
 
     st.html(f"""
     <style>
@@ -94,7 +90,7 @@ def check_subscription(user: dict) -> bool:
             font-weight: 700;
         }}
         .sub-info-card .si-status {{
-            color: {status_color};
+            color: #ef4444;
             font-size: 1.2rem;
             margin: 2px 0 1rem 0;
             font-weight: 700;
@@ -119,7 +115,7 @@ def check_subscription(user: dict) -> bool:
     </style>
 
     <div class="blocked-wrap">
-        <h1>🔒 Subscription Expired</h1>
+        <h1>&#128274; Subscription Expired</h1>
         <p>Your LayZ trial has ended. Subscribe to continue managing your PG.</p>
     </div>
 
@@ -134,38 +130,55 @@ def check_subscription(user: dict) -> bool:
 
     <div class="pay-btn-wrap">
         <a class="pay-btn" href="{payment_link}" target="_blank">
-            💳 Pay ₹{monthly_price}/mo – Subscribe Now
+            &#128179; Pay &#8377;{monthly_price}/mo &ndash; Subscribe Now
         </a>
     </div>
     """)
 
     col1, col2, col3 = st.columns([1, 2, 1])
     with col2:
-        if st.button("🔄 I have paid – Refresh Status", use_container_width=True):
-            from utils.sheets import read_sheet
-            df = read_sheet("Users")
-            if not df.empty and "email" in df.columns:
-                row = df[df["email"] == user.get("email", "")]
-                if not row.empty:
-                    st.session_state.user = row.iloc[0].to_dict()
-                    st.success("Status refreshed. Reloading…")
-                    st.rerun()
-            st.info("No change detected. Please contact support if your payment was successful.")
+        if st.button("\U0001f504 I have paid \u2013 Refresh Status", use_container_width=True):
+            _refresh_user_status(user)
 
     return True  # blocked
+
+
+def _refresh_user_status(user: dict):
+    """Re-read the Users sheet and update session state."""
+    try:
+        from utils.sheets import read_sheet
+        df = read_sheet("Users")
+        if df.empty or "email" not in df.columns:
+            st.info("Could not reach the database. Try again in a moment.")
+            return
+        email = str(user.get("email", "")).strip().lower()
+        df["email"] = df["email"].astype(str).str.strip().str.lower()
+        row = df[df["email"] == email]
+        if row.empty:
+            st.info("User not found. Contact support.")
+            return
+        updated_user = row.iloc[0].to_dict()
+        new_status = str(updated_user.get("subscription_status", "")).strip()
+        if new_status == "Active":
+            st.session_state.user = updated_user
+            st.success("✅ Subscription activated! Reloading…")
+            st.rerun()
+        else:
+            st.warning(
+                f"Status is still **{new_status}**. "
+                "If you just paid, please wait a minute and try again, "
+                "or contact support."
+            )
+    except Exception as e:
+        st.error(f"Refresh failed: {e}")
 
 
 # ── Webhook-ready stub ────────────────────────────────────────────────────────
 
 def handle_razorpay_webhook(payload: dict):
     """
-    TODO: Mount this on a separate FastAPI or Flask endpoint to receive Razorpay
-    subscription webhook events.
-
-    Events to handle:
-    - subscription.activated  → set status=Active, update expiry_date
-    - subscription.charged    → set status=Active, update expiry_date
-    - subscription.cancelled  → set status=Expired
-    - subscription.halted     → set status=Blocked
+    TODO: Mount on a FastAPI/Flask endpoint to receive Razorpay webhook events.
+    Events: subscription.activated, subscription.charged,
+            subscription.cancelled, subscription.halted
     """
     pass
