@@ -36,7 +36,7 @@ try:
 except Exception:
     payment_link = "https://rzp.io/your-payment-link"
     plan_name = "LayZ Pro"
-    monthly_price = "499"
+    monthly_price = "1499"
 
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
@@ -214,7 +214,7 @@ with col2:
         st.markdown(
             """
             - LayZ uses **Razorpay** for secure payments.
-            - You pay ₹499/month for the Pro plan.
+            - You pay ₹1499/month for the Pro plan.
             - After payment, your subscription is activated automatically (or click Refresh).
             - Your data is stored securely in your **own Google Sheets** — we never own your data.
             - Cancel anytime by stopping the Razorpay subscription.
