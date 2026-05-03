@@ -40,73 +40,153 @@ except Exception:
 
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
-    # Status card
-    st.markdown(
-        f"""
-        <div class='layz-card' style='text-align:center; padding:2rem;'>
-            <h1 style='font-size:2.5rem; margin-bottom:0.25rem; color:#8b5cf6;'>LayZ</h1>
-            <p style='color:#b8b1d9; margin-bottom:1.5rem;'>PG Management Platform</p>
 
-            <div style='display:inline-block; background:{status_color}22; color:{status_color};
-                border:1px solid {status_color}55; border-radius:999px; padding:4px 20px;
-                font-size:0.9rem; font-weight:700; margin-bottom:1.5rem;'>
-                ● {sub_status}
+    # ── Status card ──────────────────────────────────────────────────────
+    st.html(f"""
+    <style>
+        .billing-card {{
+            background: #1e1a2e;
+            border: 1px solid #3d3558;
+            border-radius: 14px;
+            padding: 2rem;
+            text-align: center;
+            margin-bottom: 1rem;
+        }}
+        .billing-card h1 {{
+            font-size: 2.5rem;
+            margin-bottom: 0.25rem;
+            color: #8b5cf6;
+        }}
+        .billing-card .subtitle {{
+            color: #b8b1d9;
+            margin-bottom: 1.5rem;
+        }}
+        .status-pill {{
+            display: inline-block;
+            background: {status_color}22;
+            color: {status_color};
+            border: 1px solid {status_color}55;
+            border-radius: 999px;
+            padding: 4px 20px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+        }}
+        .plan-grid {{
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }}
+        .plan-cell {{
+            background: #2a2540;
+            border-radius: 10px;
+            padding: 1rem;
+        }}
+        .plan-cell .label {{
+            color: #b8b1d9;
+            font-size: 0.8rem;
+            margin: 0;
+        }}
+        .plan-cell .value {{
+            color: #f5f3ff;
+            font-weight: 700;
+            margin: 4px 0 0 0;
+        }}
+        .pricing-card {{
+            background: #1e1a2e;
+            border: 1px solid #8b5cf6;
+            border-radius: 14px;
+            padding: 1.5rem;
+            text-align: center;
+            margin-bottom: 1rem;
+        }}
+        .pricing-card .plan-label {{
+            color: #b8b1d9;
+            margin: 0;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }}
+        .pricing-card .price {{
+            color: #f5f3ff;
+            font-size: 2.2rem;
+            margin: 0.25rem 0;
+        }}
+        .pricing-card .price span {{
+            font-size: 1rem;
+            color: #b8b1d9;
+        }}
+        .features {{
+            text-align: left;
+            color: #b8b1d9;
+            font-size: 0.9rem;
+            margin: 1rem 0;
+            line-height: 2;
+        }}
+        .pay-btn-wrap {{
+            text-align: center;
+            margin: 1rem 0;
+        }}
+        .pay-btn {{
+            background: #8b5cf6;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            padding: 1rem 3rem;
+            font-size: 1.1rem;
+            cursor: pointer;
+            font-weight: 800;
+            box-shadow: 0 4px 20px rgba(139,92,246,0.4);
+            text-decoration: none;
+            display: inline-block;
+        }}
+        .support-text {{
+            color: #b8b1d9;
+            font-size: 0.8rem;
+            text-align: center;
+        }}
+        .support-text a {{
+            color: #8b5cf6;
+        }}
+    </style>
+
+    <div class="billing-card">
+        <h1>LayZ</h1>
+        <p class="subtitle">PG Management Platform</p>
+        <div class="status-pill">● {sub_status}</div>
+        <div class="plan-grid">
+            <div class="plan-cell">
+                <p class="label">Current Plan</p>
+                <p class="value">{plan}</p>
             </div>
-
-            <div style='display:grid; grid-template-columns:1fr 1fr; gap:1rem; margin-bottom:1.5rem;'>
-                <div style='background:#2a2540; border-radius:10px; padding:1rem;'>
-                    <p style='color:#b8b1d9; font-size:0.8rem; margin:0;'>Current Plan</p>
-                    <p style='color:#f5f3ff; font-weight:700; margin:4px 0 0 0;'>{plan}</p>
-                </div>
-                <div style='background:#2a2540; border-radius:10px; padding:1rem;'>
-                    <p style='color:#b8b1d9; font-size:0.8rem; margin:0;'>Expiry Date</p>
-                    <p style='color:#f5f3ff; font-weight:700; margin:4px 0 0 0;'>{expiry}</p>
-                </div>
+            <div class="plan-cell">
+                <p class="label">Expiry Date</p>
+                <p class="value">{expiry}</p>
             </div>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    </div>
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # Pricing box
-    st.markdown(
-        f"""
-        <div class='layz-card' style='text-align:center; border-color:#8b5cf6;'>
-            <p style='color:#b8b1d9; margin:0; font-size:0.85rem; text-transform:uppercase;
-                letter-spacing:1px;'>LayZ Pro</p>
-            <h2 style='color:#f5f3ff; font-size:2.2rem; margin:0.25rem 0;'>
-                ₹{monthly_price}
-                <span style='font-size:1rem; color:#b8b1d9;'>/month</span>
-            </h2>
-            <div style='text-align:left; color:#b8b1d9; font-size:0.9rem; margin:1rem 0;'>
-                ✅ Unlimited buildings & rooms<br>
-                ✅ Unlimited tenants<br>
-                ✅ Rent collection & tracking<br>
-                ✅ Expense tracker<br>
-                ✅ Analytics & reports<br>
-                ✅ WhatsApp reminder links<br>
-                ✅ Google Sheets backend<br>
-            </div>
+    <div class="pricing-card">
+        <p class="plan-label">LayZ Pro</p>
+        <p class="price">₹{monthly_price} <span>/month</span></p>
+        <div class="features">
+            ✅ Unlimited buildings &amp; rooms<br>
+            ✅ Unlimited tenants<br>
+            ✅ Rent collection &amp; tracking<br>
+            ✅ Expense tracker<br>
+            ✅ Analytics &amp; reports<br>
+            ✅ WhatsApp reminder links<br>
+            ✅ Google Sheets backend<br>
         </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    </div>
 
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    st.markdown(
-        f"<div style='text-align:center;'>"
-        f"<a href='{payment_link}' target='_blank'>"
-        f"<button style='background:#8b5cf6; color:#fff; border:none; border-radius:10px; "
-        f"padding:1rem 3rem; font-size:1.1rem; cursor:pointer; font-weight:800; "
-        f"box-shadow:0 4px 20px rgba(139,92,246,0.4);'>"
-        f"💳 Pay Now – ₹{monthly_price}/month</button></a></div>",
-        unsafe_allow_html=True,
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
+    <div class="pay-btn-wrap">
+        <a class="pay-btn" href="{payment_link}" target="_blank">
+            💳 Pay Now – ₹{monthly_price}/month
+        </a>
+    </div>
+    """)
 
     if st.button("🔄 I've Paid – Refresh My Status", use_container_width=True):
         from utils.sheets import read_sheet
@@ -120,21 +200,16 @@ with col2:
                 st.rerun()
         st.info("No change detected. Contact support if payment was made.")
 
-    st.markdown("<br>", unsafe_allow_html=True)
-    st.markdown(
-        f"""
-        <div style='color:#b8b1d9; font-size:0.8rem; text-align:center;'>
-            <b>Razorpay Customer ID:</b> {rzp_customer}<br>
-            <b>Subscription ID:</b> {rzp_sub_id}<br><br>
-            For support: <a href='mailto:support@layz.in' style='color:#8b5cf6;'>support@layz.in</a>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.html(f"""
+    <div class="support-text" style="margin-top:1rem;">
+        <b>Razorpay Customer ID:</b> {rzp_customer}<br>
+        <b>Subscription ID:</b> {rzp_sub_id}<br><br>
+        For support: <a href="mailto:support@layz.in">support@layz.in</a>
+    </div>
+    """)
 
     st.divider()
 
-    # FAQ
     with st.expander("❓ How does billing work?"):
         st.markdown(
             """
