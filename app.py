@@ -5,7 +5,10 @@ Main entry point: handles login, session, and routing.
 
 import streamlit as st
 from utils.styles import inject_css
-from utils.auth import require_login, logout_user, login_user, register_user, restore_session_from_cookie
+from utils.auth import (
+    require_login, logout_user, login_user, register_user,
+    restore_session_from_cookie, render_token_reader, _write_token_to_storage
+)
 from utils.sheets import connect_to_gsheets, read_sheet
 from utils.billing import check_subscription
 
@@ -18,10 +21,20 @@ st.set_page_config(
 
 inject_css()
 
-# ─── Restore session from cookie FIRST (before any session_state defaults) ────────
+# Step 1: Try to restore session from ?s= query param (set by localStorage bridge)
 restore_session_from_cookie()
 
-# ─── Init session defaults (only if not already set by cookie restore) ───────────
+# Step 2: If still not logged in, render the JS reader that checks localStorage
+# and redirects with ?s=token if a saved token exists
+if not st.session_state.get("logged_in"):
+    render_token_reader()
+
+# Step 3: If a pending token was just issued (fresh login), write it to localStorage
+if "_pending_token" in st.session_state:
+    _write_token_to_storage(st.session_state["_pending_token"])
+    del st.session_state["_pending_token"]
+
+# Step 4: Init session defaults
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "user" not in st.session_state:
@@ -46,7 +59,6 @@ def show_login():
 
         tab_login, tab_register = st.tabs(["🔐 Login", "✍️ Register"])
 
-        # ── Login Tab ──────────────────────────────────────────────────
         with tab_login:
             with st.form("login_form"):
                 email = st.text_input("Email", placeholder="owner@example.com")
@@ -80,7 +92,6 @@ def show_login():
                     else:
                         st.error(result.get("message", "Login failed."))
 
-        # ── Register Tab ───────────────────────────────────────────────
         with tab_register:
             with st.form("register_form"):
                 r_name = st.text_input("Your Name")
@@ -102,11 +113,8 @@ def show_login():
                     st.error("Password must be at least 6 characters.")
                 else:
                     result = register_user(
-                        name=r_name,
-                        email=r_email.strip().lower(),
-                        phone=r_phone,
-                        pg_name=r_pg,
-                        password=r_pass,
+                        name=r_name, email=r_email.strip().lower(),
+                        phone=r_phone, pg_name=r_pg, password=r_pass,
                     )
                     if result["success"]:
                         st.success("Account created! Please login.")
@@ -115,7 +123,6 @@ def show_login():
 
 
 def show_sidebar(user: dict):
-    """Render sidebar navigation."""
     with st.sidebar:
         st.markdown(
             """
@@ -130,10 +137,8 @@ def show_sidebar(user: dict):
 
         sub_status = user.get("subscription_status", "Trial")
         status_color = {
-            "Active": "#22c55e",
-            "Trial": "#f59e0b",
-            "Expired": "#ef4444",
-            "Blocked": "#ef4444",
+            "Active": "#22c55e", "Trial": "#f59e0b",
+            "Expired": "#ef4444", "Blocked": "#ef4444",
         }.get(sub_status, "#b8b1d9")
         st.markdown(
             f"<div style='text-align:center;'>"
@@ -154,7 +159,7 @@ def show_sidebar(user: dict):
             st.rerun()
 
 
-# ─── Main routing ──────────────────────────────────────────────────────────────────
+# ─── Main routing ──────────────────────────────────────────────────────────────────────
 if not st.session_state.logged_in:
     show_login()
 else:
