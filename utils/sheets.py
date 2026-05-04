@@ -22,13 +22,13 @@ SCOPES = [
 
 SPREADSHEET_NAME = "LayZ_DB"
 
-# ── Sheet column definitions (used for init) ────────────────────────────────
+# ── Sheet column definitions (used for init) ────────────────────────────────────────────
 SHEET_HEADERS: dict[str, list[str]] = {
     "Users": [
         "user_id","name","email","phone","password_hash","role","pg_name",
         "subscription_status","plan_name","trial_start_date","expiry_date",
         "razorpay_customer_id","razorpay_subscription_id","payment_link",
-        "is_active","created_at",
+        "is_active","session_token","created_at",
     ],
     "Settings": [
         "setting_id","owner_email","default_rent_due_day","grace_period_days",
@@ -120,7 +120,7 @@ def get_sheet(sheet_name: str) -> Optional[gspread.Worksheet]:
         return None
 
 
-# ─── In-memory demo store (used when Sheets unavailable) ─────────────────────
+# ─── In-memory demo store (used when Sheets unavailable) ─────────────────────────────────
 _DEMO_STORE: dict[str, list[dict]] = {k: [] for k in SHEET_HEADERS}
 
 
@@ -150,15 +150,10 @@ def _demo_delete(sheet_name: str, key_field: str, key_value: Any):
     ]
 
 
-# ─── Cached read ────────────────────────────────────────────────────────────────
+# ─── Cached read ───────────────────────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=30, show_spinner=False)
 def _cached_read(sheet_name: str, _cache_version: int = 0) -> pd.DataFrame:
-    """
-    Internal cached reader. TTL=30s limits API calls to max 2/min per sheet.
-    _cache_version is bumped by _invalidate_cache() after every write
-    so fresh data is fetched immediately after mutations.
-    """
     ws = get_sheet(sheet_name)
     if ws is None:
         return _demo_read(sheet_name)
@@ -180,7 +175,7 @@ def read_sheet(sheet_name: str) -> pd.DataFrame:
     return _cached_read(sheet_name, _cache_version=version)
 
 
-# ─── Write helpers ────────────────────────────────────────────────────────────
+# ─── Write helpers ───────────────────────────────────────────────────────────────────────────
 
 def append_row(sheet_name: str, data_dict: dict) -> bool:
     """Append a new row. Columns follow SHEET_HEADERS order."""
