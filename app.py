@@ -6,10 +6,9 @@ Main entry point: handles login, session, and routing.
 import streamlit as st
 from utils.styles import inject_css
 from utils.auth import (
-    require_login, logout_user, login_user, register_user,
-    restore_session_from_cookie, render_token_reader, _write_token_to_storage
+    logout_user, login_user, register_user,
+    restore_session_from_cookie,
 )
-from utils.sheets import connect_to_gsheets, read_sheet
 from utils.billing import check_subscription
 
 st.set_page_config(
@@ -21,20 +20,10 @@ st.set_page_config(
 
 inject_css()
 
-# Step 1: Try to restore session from ?s= query param (set by localStorage bridge)
+# Restore session from ?s= query param on every page load
 restore_session_from_cookie()
 
-# Step 2: If still not logged in, render the JS reader that checks localStorage
-# and redirects with ?s=token if a saved token exists
-if not st.session_state.get("logged_in"):
-    render_token_reader()
-
-# Step 3: If a pending token was just issued (fresh login), write it to localStorage
-if "_pending_token" in st.session_state:
-    _write_token_to_storage(st.session_state["_pending_token"])
-    del st.session_state["_pending_token"]
-
-# Step 4: Init session defaults
+# Init defaults only if not set by restore
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "user" not in st.session_state:
@@ -44,7 +33,6 @@ if "selected_building" not in st.session_state:
 
 
 def show_login():
-    """Render the login / register screen."""
     col1, col2, col3 = st.columns([1, 1.2, 1])
     with col2:
         st.markdown(
@@ -67,9 +55,7 @@ def show_login():
                 with col_a:
                     submit = st.form_submit_button("Login", use_container_width=True)
                 with col_b:
-                    demo = st.form_submit_button(
-                        "🎯 Demo Login", use_container_width=True
-                    )
+                    demo = st.form_submit_button("🎯 Demo Login", use_container_width=True)
 
             if demo:
                 result = login_user("demo@layz.in", "demo1234")
@@ -78,7 +64,7 @@ def show_login():
                     st.session_state.user = result["user"]
                     st.rerun()
                 else:
-                    st.error("Demo account not found. Please seed demo data first.")
+                    st.error("Demo account not found.")
 
             if submit:
                 if not email or not password:
@@ -100,9 +86,7 @@ def show_login():
                 r_pg = st.text_input("PG / Hostel Name")
                 r_pass = st.text_input("Password", type="password")
                 r_pass2 = st.text_input("Confirm Password", type="password")
-                reg_submit = st.form_submit_button(
-                    "Create Account", use_container_width=True
-                )
+                reg_submit = st.form_submit_button("Create Account", use_container_width=True)
 
             if reg_submit:
                 if not all([r_name, r_email, r_phone, r_pg, r_pass, r_pass2]):

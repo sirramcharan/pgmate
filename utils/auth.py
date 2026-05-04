@@ -1,162 +1,133 @@
 """
 utils/auth.py
-Authentication: login, register, session management, role-based access.
+Authentication helpers for LayZ.
 
-Persistent login strategy:
-  - On login: generate UUID token, save to Users sheet (session_token col)
-  - Token is written to browser localStorage via a JS component
-  - On every page load: JS reads localStorage, posts token back to Streamlit
-  - Session is silently restored without any login prompt
+Persistent login:
+  - On login  : UUID token saved to sheet (bypassing cache) + set in st.query_params['s']
+  - On reload : app.py calls restore_session_from_cookie() which reads ?s= and does a
+                DIRECT (no-cache) sheet lookup to validate and restore the session.
+  - query_params persist across Streamlit page navigation in multipage apps.
 """
 
 from __future__ import annotations
 
 import bcrypt as _bcrypt
 import streamlit as st
-import streamlit.components.v1 as components
 import uuid
 from datetime import datetime, timedelta
 from typing import Optional
 
+import gspread
 from utils.sheets import (
-    read_sheet, append_row, update_row, new_id, now_str, today_str
+    read_sheet, append_row, update_row, new_id, now_str, today_str,
+    get_sheet, SHEET_HEADERS, _invalidate_cache
 )
 
-_TOKEN_KEY = "layz_session_token"
 
-
-# ─── Password helpers ────────────────────────────────────────────
+# ─── Password helpers ───────────────────────────────────────────────
 
 def hash_password(plain: str) -> str:
-    return _bcrypt.hashpw(plain.encode("utf-8"), _bcrypt.gensalt()).decode("utf-8")
+    return _bcrypt.hashpw(plain.encode(), _bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     try:
-        return _bcrypt.checkpw(plain.encode("utf-8"), hashed.encode("utf-8"))
+        return _bcrypt.checkpw(plain.encode(), hashed.encode())
     except Exception:
         return False
 
 
-# ─── localStorage JS bridge ────────────────────────────────────────────
+# ─── Direct (no-cache) sheet read for auth ────────────────────────────
 
-def _write_token_to_storage(token: str):
-    """Inject JS that writes the token to localStorage."""
-    components.html(
-        f"""
-        <script>
-            localStorage.setItem('{_TOKEN_KEY}', '{token}');
-        </script>
-        """,
-        height=0,
-    )
-
-
-def _clear_token_from_storage():
-    """Inject JS that removes the token from localStorage."""
-    components.html(
-        f"""
-        <script>
-            localStorage.removeItem('{_TOKEN_KEY}');
-        </script>
-        """,
-        height=0,
-    )
+def _read_users_direct() -> list[dict]:
+    """Read Users sheet directly from Google Sheets, skipping st.cache_data."""
+    ws = get_sheet("Users")
+    if ws is None:
+        return []
+    try:
+        return ws.get_all_records()
+    except Exception:
+        return []
 
 
-def render_token_reader():
+def _get_user_by_token_direct(token: str) -> Optional[dict]:
+    """Lookup user by session_token WITHOUT using the cache."""
+    if not token or token == "None":
+        return None
+    rows = _read_users_direct()
+    for row in rows:
+        if str(row.get("session_token", "")).strip() == token.strip():
+            return row
+    return None
+
+
+def _get_user_by_email_direct(email: str) -> Optional[dict]:
+    """Lookup user by email WITHOUT using the cache."""
+    rows = _read_users_direct()
+    for row in rows:
+        if str(row.get("email", "")).strip().lower() == email.strip().lower():
+            return row
+    return None
+
+
+# ─── Session restore ─────────────────────────────────────────────────
+
+def restore_session_from_cookie():
     """
-    Must be called once at the top of app.py (before any session checks).
-    Renders a hidden iframe that reads localStorage and posts the token
-    back into st.query_params so Python can read it.
-    Only fires when session is not already active.
+    Called at the top of app.py on every run.
+    Reads ?s= from query params and restores session if valid.
+    Uses a direct sheet read (no cache) so a freshly-written token is always found.
     """
     if st.session_state.get("logged_in"):
-        return
-    if st.session_state.get("_token_read_done"):
-        return
+        return  # already logged in, nothing to do
 
-    token_from_url = st.query_params.get("s")
-    if token_from_url:
-        # Already have it from a previous cycle, restore session
-        _restore_from_token(token_from_url)
-        st.session_state["_token_read_done"] = True
+    token = st.query_params.get("s")
+    if not token:
         return
 
-    # Inject JS to read localStorage and redirect with ?s=token
-    components.html(
-        f"""
-        <script>
-            const token = localStorage.getItem('{_TOKEN_KEY}');
-            if (token) {{
-                const url = new URL(window.parent.location.href);
-                url.searchParams.set('s', token);
-                window.parent.location.replace(url.toString());
-            }}
-        </script>
-        """,
-        height=0,
-    )
-
-
-# ─── User lookup ──────────────────────────────────────────────────────
-
-def get_user_by_email(email: str) -> Optional[dict]:
-    df = read_sheet("Users")
-    if df.empty or "email" not in df.columns:
-        return None
-    df["email"] = df["email"].astype(str).str.lower()
-    row = df[df["email"] == email.lower()]
-    if row.empty:
-        return None
-    return row.iloc[0].to_dict()
-
-
-def _get_user_by_token(token: str) -> Optional[dict]:
-    df = read_sheet("Users")
-    if df.empty or "session_token" not in df.columns:
-        return None
-    df["session_token"] = df["session_token"].astype(str)
-    row = df[df["session_token"] == token]
-    if row.empty:
-        return None
-    return row.iloc[0].to_dict()
-
-
-def _restore_from_token(token: str):
-    """Given a token string, look up the user and restore session_state."""
-    user = _get_user_by_token(token)
+    user = _get_user_by_token_direct(token)
     if user and str(user.get("is_active", "TRUE")).upper() in ("TRUE", "1", "YES"):
         st.session_state["logged_in"] = True
         st.session_state["user"] = user
 
 
-def restore_session_from_cookie():
-    """
-    Called at the top of every page via require_login().
-    Checks ?s= query param (set by the JS localStorage bridge in render_token_reader).
-    """
-    if st.session_state.get("logged_in"):
-        return
-    token = st.query_params.get("s")
-    if token:
-        _restore_from_token(token)
+# kept for import compatibility
+def render_token_reader():
+    pass
 
 
-# ─── Auth actions ──────────────────────────────────────────────────────
+def _write_token_to_storage(token: str):
+    pass
+
+
+# ─── Auth actions ─────────────────────────────────────────────────
 
 def login_user(email: str, password: str) -> dict:
-    user = get_user_by_email(email)
+    user = _get_user_by_email_direct(email)
     if user is None:
         return {"success": False, "message": "Email not found."}
     if str(user.get("is_active", "TRUE")).upper() not in ("TRUE", "1", "YES"):
         return {"success": False, "message": "Account is disabled."}
     if not verify_password(password, str(user.get("password_hash", ""))):
         return {"success": False, "message": "Incorrect password."}
+
     token = str(uuid.uuid4())
-    update_row("Users", "email", email.lower(), {"session_token": token})
-    # Store token in session so app.py can write it to localStorage after rerun
-    st.session_state["_pending_token"] = token
+    # Write token directly to sheet (bypass cache)
+    ws = get_sheet("Users")
+    if ws:
+        try:
+            rows = ws.get_all_records()
+            headers = ws.row_values(1)
+            for i, row in enumerate(rows):
+                if str(row.get("email", "")).strip().lower() == email.strip().lower():
+                    token_col = headers.index("session_token") + 1
+                    ws.update_cell(i + 2, token_col, token)
+                    _invalidate_cache("Users")
+                    break
+        except Exception as e:
+            st.error(f"Token write error: {e}")
+
+    # Set token in query params — persists across page navigation
     st.query_params["s"] = token
     return {"success": True, "user": user}
 
@@ -164,17 +135,34 @@ def login_user(email: str, password: str) -> dict:
 def logout_user():
     email = st.session_state.get("user", {}).get("email", "")
     if email:
-        update_row("Users", "email", email.lower(), {"session_token": ""})
+        ws = get_sheet("Users")
+        if ws:
+            try:
+                rows = ws.get_all_records()
+                headers = ws.row_values(1)
+                for i, row in enumerate(rows):
+                    if str(row.get("email", "")).strip().lower() == email.strip().lower():
+                        if "session_token" in headers:
+                            token_col = headers.index("session_token") + 1
+                            ws.update_cell(i + 2, token_col, "")
+                            _invalidate_cache("Users")
+                        break
+            except Exception:
+                pass
     try:
         st.query_params.clear()
     except Exception:
         pass
-    for key in ["logged_in", "user", "selected_building", "_token_read_done", "_pending_token"]:
+    for key in ["logged_in", "user", "selected_building"]:
         st.session_state.pop(key, None)
 
 
+def get_user_by_email(email: str) -> Optional[dict]:
+    return _get_user_by_email_direct(email)
+
+
 def register_user(name: str, email: str, phone: str, pg_name: str, password: str) -> dict:
-    existing = get_user_by_email(email)
+    existing = _get_user_by_email_direct(email)
     if existing:
         return {"success": False, "message": "Email already registered."}
 
@@ -183,23 +171,13 @@ def register_user(name: str, email: str, phone: str, pg_name: str, password: str
     expiry = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
 
     user = {
-        "user_id": user_id,
-        "name": name,
-        "email": email,
-        "phone": phone,
-        "password_hash": hash_password(password),
-        "role": "Owner",
-        "pg_name": pg_name,
-        "subscription_status": "Trial",
-        "plan_name": "Trial",
-        "trial_start_date": today_str(),
-        "expiry_date": expiry,
-        "razorpay_customer_id": "",
-        "razorpay_subscription_id": "",
-        "payment_link": "",
-        "is_active": "TRUE",
-        "session_token": token,
-        "created_at": now_str(),
+        "user_id": user_id, "name": name, "email": email, "phone": phone,
+        "password_hash": hash_password(password), "role": "Owner",
+        "pg_name": pg_name, "subscription_status": "Trial", "plan_name": "Trial",
+        "trial_start_date": today_str(), "expiry_date": expiry,
+        "razorpay_customer_id": "", "razorpay_subscription_id": "",
+        "payment_link": "", "is_active": "TRUE",
+        "session_token": token, "created_at": now_str(),
     }
     ok = append_row("Users", user)
     if not ok:
@@ -211,12 +189,11 @@ def register_user(name: str, email: str, phone: str, pg_name: str, password: str
         "auto_reminder_enabled": "FALSE", "late_fee_enabled": "FALSE",
         "late_fee_amount": "0", "created_at": now_str(), "updated_at": now_str(),
     })
-    st.session_state["_pending_token"] = token
     st.query_params["s"] = token
     return {"success": True, "user": user}
 
 
-# ─── Access guards ──────────────────────────────────────────────────────
+# ─── Access guards ─────────────────────────────────────────────────
 
 def require_login():
     restore_session_from_cookie()
