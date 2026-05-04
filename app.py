@@ -5,7 +5,7 @@ Main entry point: handles login, session, and routing.
 
 import streamlit as st
 from utils.styles import inject_css
-from utils.auth import require_login, logout_user, login_user, register_user
+from utils.auth import require_login, logout_user, login_user, register_user, restore_session_from_cookie
 from utils.sheets import connect_to_gsheets, read_sheet
 from utils.billing import check_subscription
 
@@ -18,7 +18,10 @@ st.set_page_config(
 
 inject_css()
 
-# ─── Init session defaults ───────────────────────────────────────────────────
+# ─── Restore session from cookie FIRST (before any session_state defaults) ────────
+restore_session_from_cookie()
+
+# ─── Init session defaults (only if not already set by cookie restore) ───────────
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 if "user" not in st.session_state:
@@ -43,7 +46,7 @@ def show_login():
 
         tab_login, tab_register = st.tabs(["🔐 Login", "✍️ Register"])
 
-        # ── Login Tab ──────────────────────────────────────────────────────
+        # ── Login Tab ──────────────────────────────────────────────────
         with tab_login:
             with st.form("login_form"):
                 email = st.text_input("Email", placeholder="owner@example.com")
@@ -77,7 +80,7 @@ def show_login():
                     else:
                         st.error(result.get("message", "Login failed."))
 
-        # ── Register Tab ───────────────────────────────────────────────────
+        # ── Register Tab ───────────────────────────────────────────────
         with tab_register:
             with st.form("register_form"):
                 r_name = st.text_input("Your Name")
@@ -125,7 +128,6 @@ def show_sidebar(user: dict):
         )
         st.divider()
 
-        # Subscription status badge
         sub_status = user.get("subscription_status", "Trial")
         status_color = {
             "Active": "#22c55e",
@@ -152,19 +154,17 @@ def show_sidebar(user: dict):
             st.rerun()
 
 
-# ─── Main routing ─────────────────────────────────────────────────────────────
+# ─── Main routing ──────────────────────────────────────────────────────────────────
 if not st.session_state.logged_in:
     show_login()
 else:
     user = st.session_state.user
     show_sidebar(user)
 
-    # Subscription gate
     blocked = check_subscription(user)
     if blocked:
         st.stop()
 
-    # Landing page content
     st.markdown(
         f"""
         <div style='padding:1rem 0;'>
